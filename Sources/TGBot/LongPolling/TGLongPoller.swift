@@ -7,6 +7,7 @@ actor TGLongPoller {
     private let config: TGLongPollingConfig
     private var offset: Int?
     private var task: Task<Void, Never>?
+    private var consecutiveErrors = 0
     private let logger = Logger(subsystem: "TGBot", category: "LongPoller")
 
     init(client: TGBotClient, config: TGLongPollingConfig) {
@@ -28,6 +29,7 @@ actor TGLongPoller {
                         allowedUpdates: self.config.allowedUpdates
                     )
                     let updates: [TGUpdate] = try await self.client.post("getUpdates", params: params)
+                    await self.resetBackoff()
                     for update in updates {
                         continuation.yield(update)
                     }
@@ -36,11 +38,14 @@ actor TGLongPoller {
                     }
                 } catch is CancellationError {
                     break
-                } catch {
+                } catch let error as TGBotError {
                     self.logger.error("Polling error: \(String(describing: error))")
-                    // Advance offset past failed updates to avoid infinite retry loop.
-                    // Fetch raw JSON and extract the highest update_id.
+                    // Decode or API error — skip past bad updates
                     await self.skipFailedUpdates()
+                } catch {
+                    // Network error — backoff and retry
+                    self.logger.error("Polling error: \(String(describing: error))")
+                    await self.backoff()
                 }
             }
             continuation.finish()
@@ -57,6 +62,18 @@ actor TGLongPoller {
         offset = value
     }
 
+    private func resetBackoff() {
+        consecutiveErrors = 0
+    }
+
+    /// Exponential backoff: 1s, 2s, 4s, 8s, …, capped at 30s.
+    private func backoff() async {
+        consecutiveErrors += 1
+        let delay = min(30.0, pow(2.0, Double(consecutiveErrors - 1)))
+        logger.info("Retrying in \(Int(delay))s (attempt \(self.consecutiveErrors))")
+        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+    }
+
     /// Fetches raw getUpdates JSON and advances offset past the highest
     /// update_id, skipping updates that failed to decode as [TGUpdate].
     private func skipFailedUpdates() async {
@@ -67,24 +84,19 @@ actor TGLongPoller {
                 timeout: 0,
                 allowedUpdates: config.allowedUpdates
             )
-            let raw: RawUpdatesResponse = try await client.post("getUpdates", params: params)
-            if let maxId = raw.result?.map(\.updateId).max() {
+            let raw: [RawUpdate] = try await client.post("getUpdates", params: params)
+            if let maxId = raw.map(\.updateId).max() {
                 offset = maxId + 1
                 logger.warning("Skipped updates up to \(maxId) due to decode failure")
             }
         } catch {
             logger.error("Failed to skip updates: \(String(describing: error))")
-            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1s backoff
+            await backoff()
         }
     }
 }
 
-/// Minimal type to extract update_id from raw getUpdates responses
-/// without decoding the full TGUpdate structure.
-private struct RawUpdatesResponse: Decodable, Sendable {
-    let result: [RawUpdate]?
-}
-
+/// Minimal type to extract update_id without decoding the full TGUpdate.
 private struct RawUpdate: Decodable, Sendable {
     let updateId: Int
 
