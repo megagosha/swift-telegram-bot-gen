@@ -1,5 +1,5 @@
-import TGBotAPI
 import os
+import TGBotAPI
 
 final class TGDispatcher: Sendable {
     private let handlers: [any TGHandlerProtocol]

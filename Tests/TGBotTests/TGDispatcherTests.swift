@@ -1,6 +1,6 @@
 import Testing
-import TGBotAPI
 @testable import TGBot
+import TGBotAPI
 
 @Suite
 struct TGDispatcherTests {
@@ -8,9 +8,9 @@ struct TGDispatcherTests {
         let client = MockBotClient()
         let called1 = SendableBox(false)
         let called2 = SendableBox(false)
-        let h1 = TGMessageHandler { _, _ in called1.set(true) }
-        let h2 = TGMessageHandler { _, _ in called2.set(true) }
-        let dispatcher = TGDispatcher(handlers: [h1, h2])
+        let handler1 = TGMessageHandler { _, _ in called1.set(true) }
+        let handler2 = TGMessageHandler { _, _ in called2.set(true) }
+        let dispatcher = TGDispatcher(handlers: [handler1, handler2])
 
         let update = TGUpdateFixtures.withMessage(text: "hi")
         await dispatcher.process(update, client: client)
@@ -39,9 +39,9 @@ struct TGDispatcherTests {
         let secondCalled = SendableBox(false)
 
         struct TestError: Error {}
-        let h1 = TGMessageHandler { _, _ in throw TestError() }
-        let h2 = TGMessageHandler { _, _ in secondCalled.set(true) }
-        let dispatcher = TGDispatcher(handlers: [h1, h2])
+        let failingHandler = TGMessageHandler { _, _ in throw TestError() }
+        let passingHandler = TGMessageHandler { _, _ in secondCalled.set(true) }
+        let dispatcher = TGDispatcher(handlers: [failingHandler, passingHandler])
 
         let update = TGUpdateFixtures.withMessage(text: "hi")
         await dispatcher.process(update, client: client)

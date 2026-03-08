@@ -25,9 +25,9 @@ public actor TGBot {
                     await group.next()
                     inFlight -= 1
                 }
-                let d = dispatcher
-                let c = client
-                group.addTask { await d.process(update, client: c) }
+                let currentDispatcher = dispatcher
+                let currentClient = client
+                group.addTask { await currentDispatcher.process(update, client: currentClient) }
                 inFlight += 1
             }
         }

@@ -23,7 +23,9 @@ public actor TGBotClient: TGBotClientProtocol {
     ) async throws -> Response {
         await throttleIfNeeded()
 
-        let url = URL(string: "https://api.telegram.org/bot\(token)/\(method)")!
+        guard let url = URL(string: "https://api.telegram.org/bot\(token)/\(method)") else {
+            throw TGBotError.invalidResponse
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

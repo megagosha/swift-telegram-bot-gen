@@ -61,8 +61,11 @@ enum TGUpdateFixtures {
         return value
     }
 
-    private static func jsonString(_ s: String) -> String {
-        let data = try! JSONEncoder().encode(s)
-        return String(data: data, encoding: .utf8)!
+    private static func jsonString(_ value: String) -> String {
+        guard let data = try? JSONEncoder().encode(value),
+              let encoded = String(data: data, encoding: .utf8) else {
+            return "\"\(value)\""
+        }
+        return encoded
     }
 }

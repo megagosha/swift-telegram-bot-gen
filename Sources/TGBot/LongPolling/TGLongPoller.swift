@@ -1,6 +1,6 @@
 import Foundation
-import TGBotAPI
 import os
+import TGBotAPI
 
 actor TGLongPoller {
     private let client: TGBotClient

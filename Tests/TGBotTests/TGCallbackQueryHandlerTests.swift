@@ -1,6 +1,6 @@
 import Testing
-import TGBotAPI
 @testable import TGBot
+import TGBotAPI
 
 @Suite
 struct TGCallbackQueryHandlerTests {
