@@ -142,6 +142,45 @@ public enum TypeGenerator {
 
     // MARK: – Abstract enum (type with subtypes)
 
+    /// Finds the discriminator field for an abstract type's subtypes.
+    /// Returns `(fieldName, [(subtypeName, discriminatorValue)])` if a
+    /// string discriminator exists (`type`, `source`, `status`, etc.),
+    /// or `nil` when try-each decoding is needed.
+    private static func findDiscriminator(
+        subtypes: [String],
+        types: [String: APIType]
+    ) -> (field: String, values: [(subtype: String, value: String)])? {
+        // Candidate field names used as discriminators in the Telegram API
+        let candidates = ["type", "source", "status"]
+        for candidate in candidates {
+            var values: [(String, String)] = []
+            var allHaveIt = true
+            for sub in subtypes {
+                guard let info = types[sub],
+                      let fields = info.fields,
+                      let field = fields.first(where: { $0.name == candidate }) else {
+                    allHaveIt = false
+                    break
+                }
+                let desc = field.description
+                if let range = desc.range(of: #"always "([^"]+)""#, options: .regularExpression) {
+                    let matched = String(desc[range])
+                    let parts = matched.components(separatedBy: "\"")
+                    if parts.count >= 2 {
+                        values.append((sub, parts[1]))
+                        continue
+                    }
+                }
+                allHaveIt = false
+                break
+            }
+            if allHaveIt && values.count == subtypes.count {
+                return (candidate, values)
+            }
+        }
+        return nil
+    }
+
     static func generateAbstractEnum(type t: APIType, types: [String: APIType], unionEnums: [String: String]) -> [String] {
         var lines: [String] = []
 
@@ -158,23 +197,45 @@ public enum TypeGenerator {
             lines.append("    case \(caseName)(TG\(sub))")
         }
         lines.append("")
-        lines.append("    private enum CK: String, CodingKey { case type }")
-        lines.append("")
-        lines.append("    public init(from decoder: Decoder) throws {")
-        lines.append("        let c = try decoder.container(keyedBy: CK.self)")
-        lines.append("        let type_ = try c.decode(String.self, forKey: .type)")
-        lines.append("        switch type_ {")
-        for sub in subtypes {
-            let discriminator = extractDiscriminator(typeName: sub, types: types)
-            let caseName = escapeIdentifier(deriveEnumCaseName(subtype: sub, parent: t.name))
-            lines.append("        case \"\(discriminator)\":")
-            lines.append("            self = .\(caseName)(try TG\(sub)(from: decoder))")
+
+        let disc = findDiscriminator(subtypes: subtypes, types: types)
+
+        // init(from:)
+        if let disc {
+            // Keyed discriminator strategy
+            let snakeField = disc.field
+            let camelField = snakeField.snakeToCamelCase
+            lines.append("    private enum CK: String, CodingKey { case \(camelField) = \"\(snakeField)\" }")
+            lines.append("")
+            lines.append("    public init(from decoder: Decoder) throws {")
+            lines.append("        let c = try decoder.container(keyedBy: CK.self)")
+            lines.append("        let disc = try c.decode(String.self, forKey: .\(camelField))")
+            lines.append("        switch disc {")
+            for (sub, value) in disc.values {
+                let caseName = escapeIdentifier(deriveEnumCaseName(subtype: sub, parent: t.name))
+                lines.append("        case \"\(value)\":")
+                lines.append("            self = .\(caseName)(try TG\(sub)(from: decoder))")
+            }
+            lines.append("        default:")
+            lines.append("            throw DecodingError.dataCorrupted(DecodingError.Context(")
+            lines.append("                codingPath: decoder.codingPath,")
+            lines.append("                debugDescription: \"Unknown \(t.name) discriminator: \\(disc)\"))")
+            lines.append("        }")
+            lines.append("    }")
+        } else {
+            // Try-each strategy: attempt to decode each subtype in order
+            lines.append("    public init(from decoder: Decoder) throws {")
+            for (idx, sub) in subtypes.enumerated() {
+                let caseName = escapeIdentifier(deriveEnumCaseName(subtype: sub, parent: t.name))
+                if idx < subtypes.count - 1 {
+                    lines.append("        if let v = try? TG\(sub)(from: decoder) { self = .\(caseName)(v); return }")
+                } else {
+                    lines.append("        self = .\(caseName)(try TG\(sub)(from: decoder))")
+                }
+            }
+            lines.append("    }")
         }
-        lines.append("        default:")
-        lines.append("            throw DecodingError.dataCorruptedError(forKey: .type, in: c,")
-        lines.append("                debugDescription: \"Unknown \(t.name) type: \\(type_)\")")
-        lines.append("        }")
-        lines.append("    }")
+
         lines.append("")
         lines.append("    public func encode(to encoder: Encoder) throws {")
         lines.append("        switch self {")
@@ -193,22 +254,6 @@ public enum TypeGenerator {
         if name.hasPrefix(parent) { name = String(name.dropFirst(parent.count)) }
         if name.isEmpty { name = subtype }
         return name.prefix(1).lowercased() + name.dropFirst()
-    }
-
-    private static func extractDiscriminator(typeName: String, types: [String: APIType]) -> String {
-        guard let typeInfo = types[typeName],
-              let fields = typeInfo.fields,
-              let typeField = fields.first(where: { $0.name == "type" }) else {
-            return camelToSnake(typeName)
-        }
-        let desc = typeField.description
-        // Look for: always "X"
-        if let range = desc.range(of: #"always "([^"]+)""#, options: .regularExpression) {
-            let matched = String(desc[range])
-            let parts = matched.components(separatedBy: "\"")
-            if parts.count >= 2 { return parts[1] }
-        }
-        return camelToSnake(typeName)
     }
 
     private static func camelToSnake(_ s: String) -> String {

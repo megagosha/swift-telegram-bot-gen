@@ -38,7 +38,9 @@ actor TGLongPoller {
                     break
                 } catch {
                     self.logger.error("Polling error: \(String(describing: error))")
-                    try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+                    // Advance offset past failed updates to avoid infinite retry loop.
+                    // Fetch raw JSON and extract the highest update_id.
+                    await self.skipFailedUpdates()
                 }
             }
             continuation.finish()
@@ -53,5 +55,40 @@ actor TGLongPoller {
 
     private func setOffset(_ value: Int) {
         offset = value
+    }
+
+    /// Fetches raw getUpdates JSON and advances offset past the highest
+    /// update_id, skipping updates that failed to decode as [TGUpdate].
+    private func skipFailedUpdates() async {
+        do {
+            let params = TGGetUpdatesParams(
+                offset: offset,
+                limit: config.limit,
+                timeout: 0,
+                allowedUpdates: config.allowedUpdates
+            )
+            let raw: RawUpdatesResponse = try await client.post("getUpdates", params: params)
+            if let maxId = raw.result?.map(\.updateId).max() {
+                offset = maxId + 1
+                logger.warning("Skipped updates up to \(maxId) due to decode failure")
+            }
+        } catch {
+            logger.error("Failed to skip updates: \(String(describing: error))")
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1s backoff
+        }
+    }
+}
+
+/// Minimal type to extract update_id from raw getUpdates responses
+/// without decoding the full TGUpdate structure.
+private struct RawUpdatesResponse: Decodable, Sendable {
+    let result: [RawUpdate]?
+}
+
+private struct RawUpdate: Decodable, Sendable {
+    let updateId: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case updateId = "update_id"
     }
 }

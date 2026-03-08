@@ -1,7 +1,10 @@
+import Foundation
 import TGBot
 import TGBotAPI
 
-let token = "7926680237:AAFDwRljICjsPaKxXYL10NrAm2EwYY-GlZU"
+guard let token = ProcessInfo.processInfo.environment["BOT_TOKEN"] else {
+    fatalError("BOT_TOKEN environment variable is not set")
+}
 
 let bot = TGBot(
     token: token,
