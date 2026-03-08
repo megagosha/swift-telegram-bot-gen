@@ -54,6 +54,12 @@ let package = Package(
             path: "Sources/TGBot",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        .executableTarget(
+            name: "ExampleBot",
+            dependencies: [.target(name: "TGBot")],
+            path: "Sources/ExampleBot",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .testTarget(
             name: "TGBotAPICodegenTests",
             dependencies: [.target(name: "TGBotAPICodegenLib")],

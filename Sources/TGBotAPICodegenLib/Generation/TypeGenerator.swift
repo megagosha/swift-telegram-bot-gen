@@ -220,7 +220,13 @@ public enum TypeGenerator {
         return result
     }
 
-    // MARK: – Concrete struct
+    /// Types emitted as `final class` instead of `struct` to keep their
+    /// inline size small (8-byte reference).  `TGMessage` (~100 fields)
+    /// appears 6 times inside `TGUpdate`; without this, `TGUpdate` exceeds
+    /// the 64 KB async-task stack limit and causes SIGBUS at runtime.
+    static let classTypes: Set<String> = ["Message"]
+
+    // MARK: – Concrete struct / class
 
     static func generateStruct(
         type t: APIType,
@@ -234,7 +240,12 @@ public enum TypeGenerator {
         }
 
         let fields = t.fields ?? []
-        lines.append("public struct TG\(t.name): Codable, Sendable {")
+        let isClass = classTypes.contains(t.name)
+        if isClass {
+            lines.append("public final class TG\(t.name): Codable, Sendable {")
+        } else {
+            lines.append("public struct TG\(t.name): Codable, Sendable {")
+        }
 
         // Properties
         for field in fields {

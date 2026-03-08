@@ -34,10 +34,7 @@ public actor TGBotClient: TGBotClientProtocol {
         let (data, _) = try await session.data(for: request)
         lastRequest = Date()
 
-        // Large generated types (e.g. TGUpdate at ~65KB) can overflow
-        // async thread stacks during JSON decoding.
-        // Decode on a thread with a 2MB stack.
-        let container: TGContainer<Response> = try Self.decodeOnLargeStack(data, decoder: decoder)
+        let container = try decoder.decode(TGContainer<Response>.self, from: data)
         guard container.ok else {
             throw TGBotError.apiError(
                 code: container.errorCode ?? -1,
@@ -48,23 +45,6 @@ public actor TGBotClient: TGBotClientProtocol {
             throw TGBotError.missingResult
         }
         return result
-    }
-
-    private static func decodeOnLargeStack<T: Decodable & Sendable>(
-        _ data: Data, decoder: JSONDecoder
-    ) throws -> T {
-        nonisolated(unsafe) let result = UnsafeMutablePointer<Result<T, Error>>.allocate(capacity: 1)
-        let sema = DispatchSemaphore(value: 0)
-        let thread = Thread {
-            result.initialize(to: Result { try decoder.decode(T.self, from: data) })
-            sema.signal()
-        }
-        thread.stackSize = 2 * 1024 * 1024
-        thread.start()
-        sema.wait()
-        let value = result.move()
-        result.deallocate()
-        return try value.get()
     }
 
     private func throttleIfNeeded() async {

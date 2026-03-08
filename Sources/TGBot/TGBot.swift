@@ -17,19 +17,8 @@ public actor TGBot {
     /// Starts the polling loop. Suspends until cancelled or `stop()` is called.
     public func run() async {
         let updates = await poller.start()
-        await withTaskGroup(of: Void.self) { group in
-            var inFlight = 0
-            let maxConcurrent = 40
-            for await update in updates {
-                if inFlight >= maxConcurrent {
-                    await group.next()
-                    inFlight -= 1
-                }
-                let currentDispatcher = dispatcher
-                let currentClient = client
-                group.addTask { await currentDispatcher.process(update, client: currentClient) }
-                inFlight += 1
-            }
+        for await update in updates {
+            await dispatcher.process(update, client: client)
         }
     }
 

@@ -2,7 +2,6 @@ import Foundation
 import TGBotAPI
 
 enum TGUpdateFixtures {
-    private static let decoder = JSONDecoder()
 
     static func withMessage(text: String) -> TGUpdate {
         let json = """
@@ -16,7 +15,7 @@ enum TGUpdateFixtures {
             }
         }
         """
-        return decodeOnLargeStack(json)
+        return decode(json)
     }
 
     static func withCallbackQuery(data: String = "test") -> TGUpdate {
@@ -31,34 +30,22 @@ enum TGUpdateFixtures {
             }
         }
         """
-        return decodeOnLargeStack(json)
+        return decode(json)
     }
 
     static func empty() -> TGUpdate {
-        return decodeOnLargeStack(#"{"update_id": 3}"#)
+        return decode(#"{"update_id": 3}"#)
     }
 
-    /// TGUpdate is ~65KB — decoding it in JSONDecoder requires multiple
-    /// stack-allocated copies which overflow the default test thread stack.
-    /// Run the decode on a thread with a 2MB stack.
-    private static func decodeOnLargeStack(_ json: String) -> TGUpdate {
-        let data = Data(json.utf8)
-        nonisolated(unsafe) let result = UnsafeMutablePointer<TGUpdate>.allocate(capacity: 1)
-        let sema = DispatchSemaphore(value: 0)
-        let thread = Thread {
-            do {
-                result.initialize(to: try decoder.decode(TGUpdate.self, from: data))
-            } catch {
-                fatalError("Failed to decode TGUpdate fixture: \(error)")
-            }
-            sema.signal()
+    private static func decode(_ json: String) -> TGUpdate {
+        guard let data = json.data(using: .utf8) else {
+            fatalError("Failed to encode fixture JSON as UTF-8")
         }
-        thread.stackSize = 2 * 1024 * 1024
-        thread.start()
-        sema.wait()
-        let value = result.move()
-        result.deallocate()
-        return value
+        do {
+            return try JSONDecoder().decode(TGUpdate.self, from: data)
+        } catch {
+            fatalError("Failed to decode TGUpdate fixture: \(error)")
+        }
     }
 
     private static func jsonString(_ value: String) -> String {
